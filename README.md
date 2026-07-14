@@ -106,7 +106,7 @@ Crie o arquivo `.env` a partir do arquivo de exemplo:
 
 ```bash
 cp .env.example .env
-
+```
 Windows:
 
 ```bash
