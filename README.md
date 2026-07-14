@@ -106,17 +106,17 @@ https://github.com/settings/developers
 Foto do perfil → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token
 
 #### Configurações:
-Token name: repo-stats-processamento-imagens
-Expiration: 7 days ou 30 days
-Resource owner: sua conta
-Repository access: Only select repositories
-Repository: Disciplinas-gustavoresque-UFPA/Processamento-de-Imagens-2026v2
+- Token name: repo-stats-processamento-imagens
+- Expiration: 7 days ou 30 days
+- Resource owner: sua conta
+- Repository access: Only select repositories
+- Repository: Disciplinas-gustavoresque-UFPA/Processamento-de-Imagens-2026v2
 
 #### permissões:
-Metadata: Read-only
-Contents: Read-only
-Pull requests: Read-only
-Issues: Read-only
+- Metadata: Read-only
+- Contents: Read-only
+- Pull requests: Read-only
+- Issues: Read-only
 
 Depois clica em Generate token e copia.
 
