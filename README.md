@@ -87,8 +87,7 @@ Para repositórios privados, o token é obrigatório e precisa ter permissão de
 - **Token name:** `repo-stats-processamento-imagens`
 - **Expiration:** 7 ou 30 dias
 - **Resource owner:** sua conta do GitHub
-- **Repository access:** `Only select repositories`
-- **Repository:** `Disciplinas-gustavoresque-UFPA/Processamento-de-Imagens-2026v2`
+- **Repository access:** `all repositories`
 
 ### Permissões necessárias
 
