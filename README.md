@@ -64,20 +64,49 @@ Instale as dependências:
 pip install -r requirements.txt
 ```
 
-## Token do GitHub
+## Configuração do token do GitHub
 
-Para repositórios públicos, a aplicação pode executar sem token, mas o limite de requisições será menor. Para repositórios privados, o token precisa ter acesso ao repositório.
+A aplicação utiliza a API do GitHub para coletar estatísticas do repositório. Em repositórios públicos, é possível executar sem token, porém o limite de requisições da API será menor. Para evitar erro de limite de requisições, recomenda-se configurar um token de acesso.
 
-1. Entre no GitHub.
-2. Acesse as configurações da conta.
-3. Abra Developer settings.
-4. Crie um Personal access token.
-5. Selecione somente as permissões necessárias. Para repositórios públicos, use o menor conjunto possível de permissões. Para privados, conceda acesso ao repositório.
-6. Copie o token.
-7. Coloque o token no arquivo `.env`.
-8. Nunca publique o arquivo `.env`.
+Para repositórios privados, o token é obrigatório e precisa ter permissão de leitura no repositório analisado.
 
-Crie o `.env` a partir do exemplo:
+### Como criar o token
+
+1. Entre na sua conta do GitHub.
+2. Acesse: https://github.com/settings/developers
+3. Clique em **Personal access tokens**.
+4. Acesse **Fine-grained tokens**.
+5. Clique em **Generate new token**.
+6. Configure o token com as permissões mínimas necessárias.
+7. Copie o token gerado.
+8. Coloque o token no arquivo `.env`.
+9. Nunca publique o arquivo `.env`.
+
+### Configuração recomendada
+
+- **Token name:** `repo-stats-processamento-imagens`
+- **Expiration:** 7 ou 30 dias
+- **Resource owner:** sua conta do GitHub
+- **Repository access:** `Only select repositories`
+- **Repository:** `Disciplinas-gustavoresque-UFPA/Processamento-de-Imagens-2026v2`
+
+### Permissões necessárias
+
+Configure as permissões como somente leitura:
+
+- **Metadata:** Read-only
+- **Contents:** Read-only
+- **Pull requests:** Read-only
+- **Issues:** Read-only
+
+Depois de configurar essas opções, clique em **Generate token** e copie o valor gerado.
+
+### Configurando o arquivo `.env`
+
+Crie o arquivo `.env` a partir do arquivo de exemplo:
+
+```bash
+cp .env.example .env
 
 Windows:
 
@@ -100,25 +129,6 @@ GITHUB_API_VERSION=2022-11-28
 
 O token é lido somente do `.env` ou das variáveis de ambiente. Ele não deve ser informado pela linha de comando e não é exportado nos relatórios.
 
-você pode conseguir o token em:
-https://github.com/settings/developers
-
-Foto do perfil → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token
-
-#### Configurações:
-- Token name: repo-stats-processamento-imagens
-- Expiration: 7 days ou 30 days
-- Resource owner: sua conta
-- Repository access: all repositories
-- Repository: Disciplinas-gustavoresque-UFPA/Processamento-de-Imagens-2026v2
-
-#### permissões:
-- Metadata: Read-only
-- Contents: Read-only
-- Pull requests: Read-only
-- Issues: Read-only
-
-Depois clica em Generate token e copia.
 
 ## Configuração do repositório
 
