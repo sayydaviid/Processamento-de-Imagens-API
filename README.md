@@ -109,7 +109,7 @@ Foto do perfil → Settings → Developer settings → Personal access tokens �
 - Token name: repo-stats-processamento-imagens
 - Expiration: 7 days ou 30 days
 - Resource owner: sua conta
-- Repository access: Only select repositories
+- Repository access: all repositories
 - Repository: Disciplinas-gustavoresque-UFPA/Processamento-de-Imagens-2026v2
 
 #### permissões:
