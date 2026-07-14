@@ -88,7 +88,13 @@ class Application:
         commit_rows, file_rows = self._collect_commits(commit_service, owner, repo, username, branches, out_dir)
         pr_rows = self._collect_pull_requests(pull_request_service, owner, repo, username, out_dir)
         issue_rows, issue_comment_rows, pr_comment_rows = self._collect_issues(issue_service, owner, repo, username, out_dir)
-        self._collect_official_stats(statistics_service, owner, repo, out_dir)
+        self._collect_official_stats(
+            statistics_service,
+            owner,
+            repo,
+            out_dir,
+            repo_data.get("default_branch") or "main",
+        )
 
         user_stats = statistics_service.aggregate_user_stats(
             commit_rows=commit_rows,
@@ -213,31 +219,99 @@ class Application:
         owner: str,
         repo: str,
         out_dir: Path,
+        default_branch: str | None,
     ) -> None:
         self.logger.info("Buscando estatísticas oficiais do GitHub Insights.")
         official_stats = service.get_repository_statistics(owner, repo)
         self.json_exporter.save(out_dir / "json" / "official_repository_statistics.json", official_stats)
 
+        stats_with_fallback = dict(official_stats)
+        commit_activity_rows = service.flatten_commit_activity(stats_with_fallback.get("commit_activity"))
+        code_frequency_rows = service.flatten_code_frequency(stats_with_fallback.get("code_frequency"))
+        needs_commit_activity_fallback = not commit_activity_rows
+        needs_code_frequency_fallback = not code_frequency_rows
+
+        if needs_commit_activity_fallback or needs_code_frequency_fallback:
+            if needs_commit_activity_fallback:
+                self.logger.info("commit_activity oficial indisponivel. Gerando metrica manual.")
+            if needs_code_frequency_fallback:
+                self.logger.info("code_frequency oficial indisponivel. Gerando metrica manual.")
+
+            manual_stats = service.get_manual_repository_statistics(owner, repo, default_branch)
+            self._export_manual_repository_stats(out_dir, manual_stats)
+
+            if needs_commit_activity_fallback:
+                stats_with_fallback["commit_activity"] = manual_stats["commit_activity_api_like"]
+                commit_activity_rows = service.flatten_commit_activity(stats_with_fallback.get("commit_activity"))
+            if needs_code_frequency_fallback:
+                stats_with_fallback["code_frequency"] = manual_stats["code_frequency_api_like"]
+                code_frequency_rows = service.flatten_code_frequency(stats_with_fallback.get("code_frequency"))
+
+        self.json_exporter.save(
+            out_dir / "json" / "official_repository_statistics_with_manual_fallback.json",
+            stats_with_fallback,
+        )
+
         contributors_summary, contributors_weekly = service.flatten_repo_stats_contributors(
-            official_stats.get("contributors")
+            stats_with_fallback.get("contributors")
         )
         self.csv_exporter.save(out_dir / "csv" / "repo_stats_contributors_summary.csv", contributors_summary)
         self.csv_exporter.save(out_dir / "csv" / "repo_stats_contributors_weekly.csv", contributors_weekly)
         self.csv_exporter.save(
             out_dir / "csv" / "repo_stats_code_frequency.csv",
-            service.flatten_code_frequency(official_stats.get("code_frequency")),
+            code_frequency_rows,
         )
         self.csv_exporter.save(
             out_dir / "csv" / "repo_stats_commit_activity.csv",
-            service.flatten_commit_activity(official_stats.get("commit_activity")),
+            commit_activity_rows,
         )
         self.csv_exporter.save(
             out_dir / "csv" / "repo_stats_participation.csv",
-            service.flatten_participation(official_stats.get("participation")),
+            service.flatten_participation(stats_with_fallback.get("participation")),
         )
         self.csv_exporter.save(
             out_dir / "csv" / "repo_stats_punch_card.csv",
-            service.flatten_punch_card(official_stats.get("punch_card")),
+            service.flatten_punch_card(stats_with_fallback.get("punch_card")),
+        )
+
+    def _export_manual_repository_stats(self, out_dir: Path, manual_stats: dict[str, Any]) -> None:
+        commit_activity_fields = [
+            "week_start",
+            "week_timestamp",
+            "total",
+            "sunday",
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+            "saturday",
+        ]
+        code_frequency_fields = [
+            "week_start",
+            "week_timestamp",
+            "additions",
+            "deletions",
+            "total_changes",
+        ]
+
+        self.csv_exporter.save(
+            out_dir / "csv" / "repo_stats_commit_activity_manual.csv",
+            manual_stats["commit_activity_rows"],
+            fieldnames=commit_activity_fields,
+        )
+        self.csv_exporter.save(
+            out_dir / "csv" / "repo_stats_code_frequency_manual.csv",
+            manual_stats["code_frequency_rows"],
+            fieldnames=code_frequency_fields,
+        )
+        self.json_exporter.save(
+            out_dir / "json" / "repo_stats_commit_activity_manual.json",
+            manual_stats["commit_activity_rows"],
+        )
+        self.json_exporter.save(
+            out_dir / "json" / "repo_stats_code_frequency_manual_api_like.json",
+            manual_stats["code_frequency_api_like"],
         )
 
     def _export_derived_user_stats(self, out_dir: Path, user_stats: dict[str, Any]) -> None:

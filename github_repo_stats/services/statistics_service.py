@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import logging
 from collections import Counter, defaultdict
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from github_repo_stats.api import GitHubClient
 from github_repo_stats.exceptions import GitHubApiError
 from github_repo_stats.models import UserStatistics
-from github_repo_stats.utils.date_utils import unix_timestamp_to_date
+from github_repo_stats.utils.date_utils import parse_iso_date, unix_timestamp_to_date
+
+
+DAY_NAMES = ("sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday")
 
 
 class StatisticsService:
@@ -47,6 +51,77 @@ class StatisticsService:
                 self.logger.warning("Não foi possível buscar %s: %s", name, exc)
                 stats[name] = None
         return stats
+
+    def get_manual_repository_statistics(
+        self,
+        owner: str,
+        repo: str,
+        default_branch: str | None,
+    ) -> dict[str, Any]:
+        """Calcula localmente estatisticas de atividade e frequencia de codigo."""
+
+        commit_details = self.get_default_branch_commit_details(owner, repo, default_branch)
+        manual_stats = self.build_manual_repository_statistics_from_commit_details(commit_details)
+
+        skipped_merges = manual_stats.get("skipped_merge_commits", 0)
+        if skipped_merges:
+            self.logger.info("Ignorando %s merge commits nas metricas manuais.", skipped_merges)
+
+        return manual_stats
+
+    def get_default_branch_commit_details(
+        self,
+        owner: str,
+        repo: str,
+        default_branch: str | None,
+    ) -> list[dict[str, Any]]:
+        """Busca e detalha todos os commits da branch padrao."""
+
+        if self.client is None:
+            raise GitHubApiError("Cliente GitHub nao configurado para buscar commits da branch padrao.")
+
+        branch_name = default_branch or "main"
+        self.logger.info("Buscando commits da branch padrao para fallback manual: %s", branch_name)
+        commits = self.client.paginate(f"/repos/{owner}/{repo}/commits", params={"sha": branch_name})
+        self.logger.info("Total de commits encontrados na branch padrao %s: %s", branch_name, len(commits))
+
+        detailed: list[dict[str, Any]] = []
+        total = len(commits)
+        for index, commit in enumerate(commits, start=1):
+            sha = commit.get("sha")
+            if not sha:
+                continue
+
+            self.logger.info("Detalhando commit da branch padrao %s/%s: %s", index, total, sha[:7])
+            detail = self.client.get(f"/repos/{owner}/{repo}/commits/{sha}")
+            if isinstance(detail, dict):
+                detail["_found_in_branch"] = branch_name
+                detailed.append(detail)
+
+        return detailed
+
+    @classmethod
+    def build_manual_repository_statistics_from_commit_details(
+        cls,
+        commit_details: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Gera os formatos manual e compativel com a API para duas metricas."""
+
+        # Os endpoints oficiais do GitHub podem retornar 202 por tempo indefinido;
+        # estas metricas manuais sao calculadas localmente a partir dos commits da branch padrao.
+        filtered_details = [detail for detail in commit_details if not cls._is_merge_commit(detail)]
+        skipped_merge_commits = len(commit_details) - len(filtered_details)
+
+        commit_activity_rows, commit_activity_api_like = cls._build_manual_commit_activity(filtered_details)
+        code_frequency_rows, code_frequency_api_like = cls._build_manual_code_frequency(filtered_details)
+
+        return {
+            "commit_activity_rows": commit_activity_rows,
+            "commit_activity_api_like": commit_activity_api_like,
+            "code_frequency_rows": code_frequency_rows,
+            "code_frequency_api_like": code_frequency_api_like,
+            "skipped_merge_commits": skipped_merge_commits,
+        }
 
     @staticmethod
     def flatten_repo_stats_contributors(stats_contributors: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -135,6 +210,139 @@ class StatisticsService:
                 }
             )
         return rows
+
+    @classmethod
+    def _build_manual_commit_activity(
+        cls,
+        commit_details: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        activity_by_week: dict[int, dict[str, Any]] = {}
+
+        for commit_detail in commit_details:
+            commit_datetime = cls._commit_datetime(commit_detail)
+            if commit_datetime is None:
+                continue
+
+            week_start = cls._week_start_sunday(commit_datetime)
+            week_timestamp = cls._week_timestamp(week_start)
+            day_index = cls._github_day_index(commit_datetime)
+
+            if week_timestamp not in activity_by_week:
+                activity_by_week[week_timestamp] = {
+                    "week_start": week_start.isoformat(),
+                    "week_timestamp": week_timestamp,
+                    "total": 0,
+                    "days": [0, 0, 0, 0, 0, 0, 0],
+                }
+
+            week = activity_by_week[week_timestamp]
+            week["total"] += 1
+            week["days"][day_index] += 1
+
+        rows: list[dict[str, Any]] = []
+        api_like: list[dict[str, Any]] = []
+
+        for week_timestamp in sorted(activity_by_week):
+            week = activity_by_week[week_timestamp]
+            days = week["days"]
+            row = {
+                "week_start": week["week_start"],
+                "week_timestamp": week["week_timestamp"],
+                "total": week["total"],
+            }
+            row.update({day_name: days[index] for index, day_name in enumerate(DAY_NAMES)})
+            rows.append(row)
+
+            api_like.append(
+                {
+                    "week": week["week_timestamp"],
+                    "total": week["total"],
+                    "days": days,
+                }
+            )
+
+        return rows, api_like
+
+    @classmethod
+    def _build_manual_code_frequency(
+        cls,
+        commit_details: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[list[int]]]:
+        frequency_by_week: dict[int, dict[str, Any]] = {}
+
+        for commit_detail in commit_details:
+            commit_datetime = cls._commit_datetime(commit_detail)
+            if commit_datetime is None:
+                continue
+
+            week_start = cls._week_start_sunday(commit_datetime)
+            week_timestamp = cls._week_timestamp(week_start)
+            stats = commit_detail.get("stats", {}) or {}
+            additions = cls._safe_int(stats.get("additions"))
+            deletions = cls._safe_int(stats.get("deletions"))
+            total_changes = cls._safe_int(stats.get("total"))
+            if not total_changes:
+                total_changes = additions + deletions
+
+            if week_timestamp not in frequency_by_week:
+                frequency_by_week[week_timestamp] = {
+                    "week_start": week_start.isoformat(),
+                    "week_timestamp": week_timestamp,
+                    "additions": 0,
+                    "deletions": 0,
+                    "total_changes": 0,
+                }
+
+            week = frequency_by_week[week_timestamp]
+            week["additions"] += additions
+            week["deletions"] += deletions
+            week["total_changes"] += total_changes
+
+        rows = [frequency_by_week[week_timestamp] for week_timestamp in sorted(frequency_by_week)]
+        api_like = [
+            [row["week_timestamp"], row["additions"], -row["deletions"]]
+            for row in rows
+        ]
+
+        return rows, api_like
+
+    @staticmethod
+    def _is_merge_commit(commit_detail: dict[str, Any]) -> bool:
+        parents = commit_detail.get("parents") or []
+        return isinstance(parents, list) and len(parents) > 1
+
+    @staticmethod
+    def _commit_datetime(commit_detail: dict[str, Any]) -> datetime | None:
+        commit_obj = commit_detail.get("commit", {}) or {}
+        author_obj = commit_obj.get("author", {}) or {}
+        committer_obj = commit_obj.get("committer", {}) or {}
+        raw_date = author_obj.get("date") or committer_obj.get("date")
+        parsed = parse_iso_date(raw_date)
+        if parsed is None:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    @staticmethod
+    def _week_start_sunday(value: datetime) -> date:
+        days_since_sunday = (value.weekday() + 1) % 7
+        return value.date() - timedelta(days=days_since_sunday)
+
+    @staticmethod
+    def _week_timestamp(week_start: date) -> int:
+        return int(datetime.combine(week_start, time.min, tzinfo=timezone.utc).timestamp())
+
+    @staticmethod
+    def _github_day_index(value: datetime) -> int:
+        return (value.weekday() + 1) % 7
+
+    @staticmethod
+    def _safe_int(value: Any) -> int:
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
 
     @staticmethod
     def flatten_participation(participation: Any) -> list[dict[str, Any]]:
