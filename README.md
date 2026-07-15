@@ -130,8 +130,10 @@ O token é lido somente do `.env` ou das variáveis de ambiente. Ele não deve s
 
 
 ## Configuração do repositório
+obs: você deverá mudar seu usuário, se quiser um repositório diferente, mude o owner e o repo.
 
 Você pode executar com argumentos:
+
 
 ```bash
 python main.py --owner Disciplinas-gustavoresque-UFPA --repo Processamento-de-Imagens-2026v2 --user sayydaviid
